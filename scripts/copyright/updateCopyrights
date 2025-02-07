@@ -1,0 +1,501 @@
+#!/bin/bash
+
+#    (?m)^.*Copyright \(c\) \d\d\d\d(-\d\d\d\d)?\. Open Mobile Platform LLC\.$
+#local existed_copyright=$(grep -Eo '^.*Copyright \(c\) [0-9]+[0-9]+[0-9]+[0-9]+(-[0-9]+[0-9]+[0-9]+[0-9]+)?\. Open Mobile Platform LLC\.$'
+#find . -name "*.cpp" -o -name "*.h" -o -name "*.qml"
+#. -not -path "./.git/*" -type f
+#find . -not -path "./.git/*" -type f | xargs grep -H -c 'LLC' | grep 0$ | cut -d':' -f1
+#ind . -name ".cpp" -o -name ".h" -o -name ".qml" -exec echo {} +
+
+# creation_date_git=$(date --date="$(git log --follow --format=%aI --all ${file_name} | tail -1)" "+%Y")
+# creation_date_stat=$(date --date="@$(stat -c '%W' ${file_name})" "+%Y")
+# 
+# modification_date_system_git=$(date --date="$(git log --follow --format=%aI --all ${file_name} | head -1)" "+%Y")
+# modification_date_system_stat=$(date --date="@$(stat -c '%Y' ${file_name})" "+%Y")
+
+function getYearFromDate() {
+    local date="$1"
+    echo $(date --date="$date" "+%Y");
+}
+
+function getGitCreationDate() {
+    local file="$1"
+    
+    result="$(git log --follow --format=%aI --all $file 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetGitCreationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    result=$(echo "$result" | tail -1)
+    if [[ "$result" == "" ]]; then
+        echo ""
+        return 0
+    fi
+    
+    result="$(date --date="$result" 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetGitCreationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    
+    echo "$result"
+    return 0    
+}
+
+function getGitModificationDate() {
+    local file="$1"
+    
+    result="$(git log --follow --format=%aI --all $file 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetGitModificationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    result=$(echo "$result" | head -1)
+    if [[ "$result" == "" ]]; then
+        echo ""
+        return 0
+    fi
+    
+    result="$(date --date="$result" 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetGitModificationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    
+    echo "$result"
+    return 0    
+}
+
+function getStatCreationDate() {
+    local file="$1"
+    
+    result="$(stat -c '%W' $file 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetStatCreationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    if [[ "$result" == "" ]]; then
+        echo ""
+        return 0
+    fi
+    
+    result="$(date --date="@$result" 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetStatCreationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    echo "$result"
+    return 0    
+}
+
+function getStatModificationDate() {
+    local file="$1"
+    
+    result="$(stat -c '%Y' $file 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetStatModificationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    if [[ "$result" == "" ]]; then
+        echo ""
+        return 0
+    fi
+    
+    result="$(date --date="@$result" 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetStatModificationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    echo "$result"
+    return 0    
+}
+
+function getCopyright() {
+    local arr_input=("$@")
+    local arr=()
+    
+    for i in "${arr_input[@]}"; do
+        if [[ "$i" != "" ]]; then
+            arr+=($i)
+        fi
+    done
+    
+    local min=${arr[0]}
+    local max=${arr[0]}
+    
+    for i in "${arr[@]}"; do
+        if (( i < min )); then
+            min=$i
+        elif (( i > max )); then
+            max=$i
+        fi
+    done
+    
+    if [[ "$min" == "$max" ]]; then
+        local copyright_short_placeholder="$comment Copyright (c) ${min}. Open Mobile Platform LLC."
+        echo $copyright_short_placeholder
+    else
+        local copyright_long_placeholder="$comment Copyright (c) ${min}-${max}. Open Mobile Platform LLC."
+        echo $copyright_long_placeholder
+    fi   
+}
+
+function goFile() {
+    local file="$1"
+    local comment="$2"
+    
+    echo -e "[$PWD/$file]\n"
+    
+    #check if file exist
+    
+    local hasError="false"
+    
+    local statCreationDate="$(getStatCreationDate $file)"
+    if [[ "$?" != "0" ]]; then
+        echo "bad date 1"
+        hasError="true"
+    fi
+    
+    local statModificationDate="$(getStatModificationDate $file)"
+    if [[ "$?" != "0" ]]; then
+        echo "bad date 2"
+        hasError="true"
+    fi
+    
+    local gitCreationDate="$(getGitCreationDate $file)"
+    if [[ "$?" != "0" ]]; then
+        echo "bad date 3"
+        hasError="true"
+    fi
+    
+    local gitModificationDate="$(getGitModificationDate $file)"
+    if [[ "$?" != "0" ]]; then
+        echo "bad date 4"
+        hasError="true"
+    fi
+    
+    local nowDate=$(date)
+    
+    echo -e "statCreationDate:\t$statCreationDate"
+    echo -e "statModificationDate:\t$statModificationDate"
+    echo -e "gitCreationDate:\t${gitCreationDate:-Do not exist in git}"
+    echo -e "gitModificationDate:\t${gitModificationDate:-Do not exist in git}"
+    echo -e "nowDate:\t\t$nowDate"
+    echo -e "\n"
+    
+    #if hasError="true"
+    
+    
+    local copyright_regexp='^.*Copyright \(c\) ([0-9]+[0-9]+[0-9]+[0-9]+)(-[0-9]+[0-9]+[0-9]+[0-9]+)?\. Open Mobile Platform LLC\.$'
+    local founded=$(sed -nr "s/$copyright_regexp/\0/p" $file)
+    local existed_copyright_created=$(sed -nr "s/$copyright_regexp/\1/p" $file)
+    local existed_copyright_modified=$(sed -nr "s/$copyright_regexp/\2/p" $file | cut -c2-)
+    
+    local year_git_start=$(getYearFromDate "$gitCreationDate")
+    local year_git_finish=$(getYearFromDate "$gitModificationDate")
+    local year_now=$(getYearFromDate "$nowDate")
+    
+    local allYears=()
+    
+    allYears+=($existed_copyright_created)
+    allYears+=($existed_copyright_modified)
+    allYears+=($year_git_start)
+    allYears+=($year_git_finish)
+    
+#     if [[ "$gitCreationDate" == "" ]]; then
+#         allYears+=($year_now)
+#     fi
+
+    echo ${allYears[@]}
+    
+    copy="$(getCopyright "${allYears[@]}")"
+    
+    echo "$copy\n$founded"
+    
+    if [[ "$founded" != "$copy" || "$founded" == "" ]]; then
+        allYears+=($year_now)
+        copy="$(getCopyright "${allYears[@]}")"  
+        
+        if [[ "$founded" == "" ]]; then
+            sed -i -r "1s|^|${copy}\n\n|" $file
+        else
+            sed -i -r "s|$copyright_regexp|$copy|" $file
+        fi
+    fi
+    
+    return 0
+    
+    #look only for filies in git db // not staged or unstaged
+    
+    
+    
+    
+    
+    
+    
+    
+    local copyright_single_placeholder="$comment Copyright (c) ${date_now}. Open Mobile Platform LLC."
+    local copyright_range_placeholder="$comment Copyright (c) ${creation_date}-${date_now}. Open Mobile Platform LLC."
+    
+    local copyright_regexp='^.*Copyright \(c\) ([0-9]+[0-9]+[0-9]+[0-9]+)(-[0-9]+[0-9]+[0-9]+[0-9]+)?\. Open Mobile Platform LLC\.$'
+
+    local existed_copyright=$(sed -nr "s/$copyright_regexp/\0/p" $file)
+    
+    allYears=()
+        
+    if [[ "$existed_copyright" == "" ]]; then
+        echo 'Not contains copyright'
+        
+        if [[ "$gitCreationDate" == "" ]]; then
+            local year=$(getYearFromDate "$nowDate")
+        
+            echo "Not in the git, create copyright from current date, $year"
+            local copyright_single_placeholder="$comment Copyright (c) ${year}. Open Mobile Platform LLC."
+            sed -i -r "1s|^|${copyright_single_placeholder}\n\n|" $file
+            return 0
+        fi
+        
+        local year_git=$(getYearFromDate "$gitCreationDate")
+        local year_now=$(getYearFromDate "$nowDate")
+        
+        if [[ "$year_git" == "$year_now" ]]; then
+            echo "In the git with a current date, adding $year"
+            local copyright_single_placeholder="$comment Copyright (c) ${year_git}. Open Mobile Platform LLC."
+            sed -i -r "1s|^|${copyright_single_placeholder}\n\n|" $file
+            return 0
+        else
+            echo "In the git with a diffrent date, adding $year_git - $year_now"
+            local copyright_range_placeholder="$comment Copyright (c) ${year_git}-${year_now}. Open Mobile Platform LLC."
+            sed -i -r "1s|^|${copyright_range_placeholder}\n\n|" $file
+            return 0
+        fi
+        
+        return 0
+    fi
+    
+    echo 'containss'
+        
+    local founded=$(sed -nr "s/$copyright_regexp/\0/p" $file)
+    local existed_copyright_created=$(sed -nr "s/$copyright_regexp/\1/p" $file)
+    local existed_copyright_modified=$(sed -nr "s/$copyright_regexp/\2/p" $file | cut -c2-)
+    
+    allYears+=($existed_copyright_created)
+    allYears+=($existed_copyright_modified)
+    
+    if [[ "$gitCreationDate" == "" ]]; then
+            local year=$(getYearFromDate "$nowDate")
+            allYears+=($year)
+        fi
+        
+        #только если файл менялся с finish mod date
+        
+        
+        #gitModificationDate:
+        #statModificationDate:
+    
+    
+    copy="$(getCopyright "${allYears[@]}")"
+    
+    if [[ "$founded" != "$copy" ]]; then
+        local year_now=$(getYearFromDate "$nowDate")
+        allYears+=($year_now)
+        
+        copy="$(getCopyright "${allYears[@]}")"
+    
+        sed -i -r "s|$copyright_regexp|$copy|" $file
+    fi
+    
+    
+    return 1
+    
+    
+    
+    #single
+    if [[ "$existed_copyright_modified" == "" ]]; then
+        if [[ "$gitCreationDate" == "" ]]; then
+            local year=$(getYearFromDate "$nowDate")
+        
+            echo "Not in the git, create copyright from current date, $year"
+            local copyright_single_placeholder="$comment Copyright (c) ${year}. Open Mobile Platform LLC."
+            sed -i -r "1s|^|${copyright_single_placeholder}\n\n|" $file
+            return 0
+        fi
+    
+    
+    
+    
+    
+    
+    
+        local year_git=$(getYearFromDate "$gitCreationDate")
+        local year_now=$(getYearFromDate "$nowDate")
+        
+        local start_date=$existed_copyright_created
+        if (( year_git < existed_copyright_created )); then
+            start_date=$year_git
+        fi
+        
+        if [[ "$year_git" == "$existed_copyright_created" ]]; then
+            echo "In the git with a current date, adding $year"
+            local copyright_single_placeholder="$comment Copyright (c) ${year_git}. Open Mobile Platform LLC."
+            sed -i -r "1s|^|${copyright_single_placeholder}\n\n|" $file
+            return 0
+        else
+            echo "In the git with a diffrent date, adding $year_git - $year_now"
+            local copyright_range_placeholder="$comment Copyright (c) ${year_git}-${year_now}. Open Mobile Platform LLC."
+            sed -i -r "1s|^|${copyright_range_placeholder}\n\n|" $file
+            return 0
+        fi
+    
+    
+        if [[ "$existed_copyright_created" != "$modification_date" ]]; then
+                echo "long $existed_copyright_created -> $creation_date, $existed_copyright_modified -> $modification_date"
+                
+                #TODO tmp
+                local copyright_long_placeholder="$comment Copyright (c) ${existed_copyright_created}-${date_now}. Open Mobile Platform LLC."
+                sed -i -r "s|$copyright_regexp|$copyright_long_placeholder|" $file_name
+            fi
+    fi
+}
+
+#goFile qqq.cpp "//"
+#goFile qwe "//"
+#goFile bla
+
+cd /home/yas/omp-crypto-storage
+export -f getCopyright
+export -f getStatModificationDate
+export -f getStatCreationDate
+export -f getGitCreationDate
+export -f getGitModificationDate
+export -f getYearFromDate
+export -f goFile
+
+#goFile lib/XorCrypt.h "//"
+
+#find . -not -path "*.git/*" -not -path "./submodules/*" \( -name "*.cpp" -o -name "*.h" -o -name "*.qml" \) -exec bash -c 'goFile "{}" "//"' \;
+
+readarray -d '' arr < <(find . -not -path "*.git/*" -not -path "./submodules/*" \( -name "*.cpp" -o -name "*.h" -o -name "*.qml" \) -print0)
+
+for i in "${arr[@]}"
+do
+   echo "$i"
+   goFile "$i" "//"
+done
+
+
+#--use git dates
+
+
+# if no copyright
+#     if in git
+#         git_start-git_finish
+#     else
+#         current date? or stat_modification_date
+# else
+#     if range
+#         check start == git_start // if not what when? do no change start date
+#         finish == git finish? or current date or stat date
+#     
+#     else //single
+#         check with current date or stat date
+#         if not what then? what start and finish dates?
+#     
+#     
+#     if i set mod date, then file will be modified, and script wanna change it again 
+
+
+
+
+
+function updateCopyrights() {
+    comment="$1"
+    file_name="$2"  
+    
+    creation_date=$(date --date="$(git log --follow --format=%aI --all ${file_name} | tail -1)" "+%Y")
+    #modification_date=$(date --date="@$(stat -c '%Y' ${file_name})" "+%Y")
+    modification_date=$(date --date="$(git log --follow --format=%aI --all ${file_name} | head -1)" "+%Y")
+    date_now=$(date "+%Y")
+    
+    # check if modification_date incorrect
+    
+    ####
+    
+    creation_date_git=$(date --date="$(git log --follow --format=%aI --all ${file_name} | tail -1)" "+%Y")
+    creation_date_stat=$(date --date="@$(stat -c '%W' ${file_name})" "+%Y")
+
+    modification_date_system_git=$(date --date="$(git log --follow --format=%aI --all ${file_name} | head -1)" "+%Y")
+    modification_date_system_stat=$(date --date="@$(stat -c '%Y' ${file_name})" "+%Y")
+    
+    echo $creation_date_git $creation_date_stat $modification_date_system_git $modification_date_system_stat
+    return
+    
+    ####
+    
+    echo $comment $file_name $creation_date $modification_date
+    
+    local copyright_short_placeholder="$comment Copyright (c) ${date_now}. Open Mobile Platform LLC."
+    local copyright_long_placeholder="$comment Copyright (c) ${creation_date}-${date_now}. Open Mobile Platform LLC."
+    
+    local copyright_regexp='^.*Copyright \(c\) ([0-9]+[0-9]+[0-9]+[0-9]+)(-[0-9]+[0-9]+[0-9]+[0-9]+)?\. Open Mobile Platform LLC\.$'
+    
+    local existed_copyright=$(sed -nr "s/$copyright_regexp/\0/p" $file_name)
+
+    if [[ "$existed_copyright" != "" ]]; then
+        echo 'contains'
+        
+        local existed_copyright_created=$(sed -nr "s/$copyright_regexp/\1/p" $file_name)
+        local existed_copyright_modified=$(sed -nr "s/$copyright_regexp/\2/p" $file_name | cut -c2-)
+        
+        if [[ "$existed_copyright_modified" == "" ]]; then
+            if [[ "$existed_copyright_created" != "$modification_date" ]]; then
+                echo "long $existed_copyright_created -> $creation_date, $existed_copyright_modified -> $modification_date"
+                
+                #TODO tmp
+                local copyright_long_placeholder="$comment Copyright (c) ${existed_copyright_created}-${date_now}. Open Mobile Platform LLC."
+                sed -i -r "s|$copyright_regexp|$copyright_long_placeholder|" $file_name
+            fi
+        else
+#             if [[ "$existed_copyright_created" != "$creation_date" ]] || [[ "$existed_copyright_modified" != "$modification_date" ]]; then
+#                 echo "old $existed_copyright_created -> $creation_date, $existed_copyright_modified -> $modification_date"
+#                 echo "s|${copyright_regexp}|${copyright_long_placeholder}|"
+#                 sed -i -r "s|${copyright_regexp}|${copyright_long_placeholder}|" $file_name
+#             fi
+            if [[ "$existed_copyright_modified" != "$modification_date" ]]; then
+                echo "old $existed_copyright_created -> $creation_date, $existed_copyright_modified -> $modification_date"
+                
+                #TODO tmp
+                local copyright_long_placeholder="$comment Copyright (c) ${existed_copyright_created}-${date_now}. Open Mobile Platform LLC."
+                sed -i -r "s|${copyright_regexp}|${copyright_long_placeholder}|" $file_name
+            fi
+        fi
+        
+        return
+    fi
+
+    sed -i -r "1s|^|${copyright_short_placeholder}\n\n|" $file_name
+}
+
+# export -f updateCopyrights
+# find . -not -path "*.git/*" -not -path "./submodules/*" \( -name "*.cpp" -o -name "*.h" -o -name "*.qml" \) -exec bash -c 'updateCopyrights "//" "{}"' \;
+# find . -not -path "*.git/*" -not -path "./submodules/*" \( -name "*.pro" -o -name "*.pri" \) -exec bash -c 'updateCopyrights "#" "{}"' \;
+
+#updateCopyrights $@
+
+
