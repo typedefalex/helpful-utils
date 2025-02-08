@@ -1,0 +1,380 @@
+#!/bin/bash
+
+# Copyright 2025 Alex Yakubinskiy <prktown@gmail.com>
+
+set -f
+
+VERBOSE=false
+DRY_RUN=false
+ALL_FILES_COUNT=0
+UPDATE_FILES_COUNT=0
+
+excludeDirs=()
+excludeDirs+=(-not -path "*.git/*")
+filesToFind=()
+dirs=()
+
+COPYRIGHT_PLACEHOLDER=""
+COPYRIGHT_REGEXP=""
+
+function getYearFromDate() {
+    local date="$1"
+    echo $(date --date="$date" "+%Y");
+}
+
+function getGitCreationDate() {
+    local file="$1"
+    
+    local result="$(git log --follow --format=%aI --all $file 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetGitCreationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    result=$(echo "$result" | tail -1)
+    if [[ "$result" == "" ]]; then
+        echo ""
+        return 0
+    fi
+    
+    result="$(date --date="$result" 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetGitCreationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    
+    echo "$result"
+    return 0    
+}
+
+function getGitModificationDate() {
+    local file="$1"
+    
+    local result="$(git log --follow --format=%aI --all $file 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetGitModificationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    result=$(echo "$result" | head -1)
+    if [[ "$result" == "" ]]; then
+        echo ""
+        return 0
+    fi
+    
+    result="$(date --date="$result" 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetGitModificationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    
+    echo "$result"
+    return 0    
+}
+
+function getStatCreationDate() {
+    local file="$1"
+    
+    local result="$(stat -c '%W' $file 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetStatCreationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    if [[ "$result" == "" ]]; then
+        echo ""
+        return 0
+    fi
+    
+    result="$(date --date="@$result" 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetStatCreationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    echo "$result"
+    return 0    
+}
+
+function getStatModificationDate() {
+    local file="$1"
+    
+    local result="$(stat -c '%Y' $file 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetStatModificationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    if [[ "$result" == "" ]]; then
+        echo ""
+        return 0
+    fi
+    
+    result="$(date --date="@$result" 2>&1)"
+    if [[ "$?" != "0" ]]; then
+        echo -e "File: $file\ngetStatModificationDate error, $result\n\n" 1>&2
+        echo ""
+        return 1
+    fi
+    
+    echo "$result"
+    return 0    
+}
+
+function getCopyrightFromDates() {
+    local copyright_placeholder="$1"
+    shift
+    local arr_input=("$@")
+    local arr=()
+    
+    # skip empty elements
+    for i in "${arr_input[@]}"; do
+        if [[ "$i" != "" ]]; then
+            arr+=($i)
+        fi
+    done
+    
+    local min=${arr[0]}
+    local max=${arr[0]}
+    
+    # find min, max dates
+    for i in "${arr[@]}"; do
+        if (( i < min )); then
+            min=$i
+        elif (( i > max )); then
+            max=$i
+        fi
+    done
+   
+    if [[ "$min" == "$max" ]]; then  
+        local placeholder_date="${min}"      
+    else
+        local placeholder_date="${min}-${max}"
+    fi
+
+    local placeholder=${copyright_placeholder/|date|/"$placeholder_date"}
+    echo "$placeholder"
+}
+
+function goFile() {
+    local file="$1"
+    local copyright_placeholder="$2"
+    local copyright_regexp="$3"
+    
+    ALL_FILES_COUNT=$((ALL_FILES_COUNT + 1))
+    
+    if $VERBOSE; then
+        echo -e "\n[$(realpath $file)]"
+    fi
+    
+    local hasError="false"
+    
+    local statCreationDate="$(getStatCreationDate $file)"
+    if [[ "$?" != "0" ]]; then
+        echo "Error: bad statCreationDate"
+        hasError="true"
+    fi
+    
+    local statModificationDate="$(getStatModificationDate $file)"
+    if [[ "$?" != "0" ]]; then
+        echo "Error: bad statModificationDate"
+        hasError="true"
+    fi
+    
+    local gitCreationDate="$(getGitCreationDate $file)"
+    if [[ "$?" != "0" ]]; then
+        echo "Error: bad gitCreationDate"
+        hasError="true"
+    fi
+    
+    local gitModificationDate="$(getGitModificationDate $file)"
+    if [[ "$?" != "0" ]]; then
+        echo "Error: bad gitModificationDate"
+        hasError="true"
+    fi
+    
+    local nowDate=$(date)
+    
+    if $VERBOSE; then
+        echo -e "\tstatCreationDate:\t$statCreationDate"
+        echo -e "\tstatModificationDate:\t$statModificationDate"
+        echo -e "\tgitCreationDate:\t${gitCreationDate:-Do not exist in git}"
+        echo -e "\tgitModificationDate:\t${gitModificationDate:-Do not exist in git}"
+        echo -e "\tnowDate:\t\t$nowDate"
+        echo -e ""
+    fi
+    
+    if [[ $hasError == "true" ]]; then
+        exit 1
+    fi 
+
+    local founded=$(sed -nr "s/$copyright_regexp/\0/p" $file)
+    local existed_copyright_start=$(sed -nr "s/$copyright_regexp/\1/p" $file)
+    local existed_copyright_end=$(sed -nr "s/$copyright_regexp/\2/p" $file | cut -c2-)
+    
+    local year_git_start=$(getYearFromDate "$gitCreationDate")
+    local year_git_finish=$(getYearFromDate "$gitModificationDate")
+    local year_now=$(getYearFromDate "$nowDate")
+    
+    local allYears=()
+    
+    allYears+=($existed_copyright_start)
+    allYears+=($existed_copyright_end)
+    allYears+=($year_git_start)
+    allYears+=($year_git_finish)
+    
+    target_copyright="$(getCopyrightFromDates "${copyright_placeholder}" "${allYears[@]}")"
+    
+    if $VERBOSE; then
+        echo -e "\tFounded copyright:\t$founded"
+        echo -e "\tTarget copyright:\t$target_copyright"
+    fi
+    
+    # check if target copyright if differ than existed or
+    # if we did not find any copyright
+    if [[ "$founded" != "$target_copyright" || "$founded" == "" ]]; then
+        # since we changing file, our end date must be current year
+        allYears+=($year_now)
+        target_copyright="$(getCopyrightFromDates "${copyright_placeholder}" "${allYears[@]}")"
+        
+        if $VERBOSE; then
+            echo -e "\n\t[v] $(realpath $file) will be updated"
+        else
+            echo -e "[v] $(realpath $file) will be updated"
+            echo -e "\tOld copyright: $founded"
+            echo -e "\tNew copyright: $target_copyright\n"
+        fi
+        
+        UPDATE_FILES_COUNT=$((UPDATE_FILES_COUNT + 1))
+        
+        if ! $DRY_RUN; then
+            if [[ "$founded" == "" ]]; then
+                sed -i -r "1s|^|${target_copyright}\n\n|" $file
+            else
+                sed -i -r "s|$copyright_regexp|$target_copyright|" $file
+            fi
+        fi
+    fi
+}
+
+function updateDir() {
+    local dir="$1"
+    
+    ALL_FILES_COUNT=0
+    UPDATE_FILES_COUNT=0
+    
+    cd "$dir"
+    readarray -d '' arr < <(find . "${excludeDirs[@]}" \( "${filesToFind[@]}" \) -print0)
+  
+    for i in "${arr[@]}"; do
+        #echo "$i" "$COPYRIGHT_PLACEHOLDER" "$COPYRIGHT_REGEXP"
+        goFile "$i" "$COPYRIGHT_PLACEHOLDER" "$COPYRIGHT_REGEXP"
+        #"// Copyright (c) |date|. Open Mobile Platform LLC." '^.*Copyright \(c\) ([0-9]+[0-9]+[0-9]+[0-9]+)(-[0-9]+[0-9]+[0-9]+[0-9]+)?\. Open Mobile Platform LLC\.$'
+    done
+    
+    echo "[=] for $dir:"
+    echo -e "\tFiles found:\t$ALL_FILES_COUNT"
+    
+    if $DRY_RUN; then
+        echo -e "\tFiles updated:\t0 (Dry run, skipped $UPDATE_FILES_COUNT files)"
+    else
+        echo -e "\tFiles updated:\t$UPDATE_FILES_COUNT"
+    fi
+}
+
+function parseCli() {
+    PARAMS=()
+    
+    while (( "$#" )); do
+    case "$1" in
+        --placeholder)
+        COPYRIGHT_PLACEHOLDER="$2"
+        shift 2
+        ;;
+        
+        --regexp)
+        COPYRIGHT_REGEXP="$2"
+        shift 2
+        ;;
+        
+        --exclude)
+        excludeDirs+=(-not -path "./$2")
+        shift 2
+        ;;       
+        
+        --file)
+        if [[ ${#filesToFind[@]} == 0 ]]; then
+            filesToFind+=(-name "$2")
+        else
+            filesToFind+=(-o -name "$2")
+        fi
+        shift 2
+        ;;  
+        
+        -v|--verbose)
+        VERBOSE=true
+        shift
+        ;;
+        
+        --dry-run)
+        DRY_RUN=true
+        shift
+        ;;
+        
+        --) # end argument parsing
+        shift
+        break
+        ;;
+        
+        -*|--*=) # unsupported flags
+        echo "Error: Unsupported flag $1" >&2
+        exit 1
+        ;;
+        
+        *) # preserve positional arguments
+        dirs+=("$1")
+        PARAMS+=("$1")
+        shift
+        ;;
+    esac
+    done
+}
+
+parseCli "$@"
+
+if [[ "$COPYRIGHT_PLACEHOLDER" == "" ]]; then
+    echo -e "\nError: set copyright placeholder with --placeholder"
+    exit 1
+fi
+
+if [[ "$COPYRIGHT_REGEXP" == "" ]]; then
+    echo -e "\nError: set copyright regexp with --regexp"
+    exit 1
+fi
+
+echo -e "\nWill look in dirs:"
+
+for i in "${dirs[@]}"; do
+    if [[ ${i:0:1} != / ]]; then
+        echo "Error: directory $i is not absolute path"
+        exit 1
+    fi
+    
+    echo -e "\t$i"
+done
+
+echo -en "\n\n"
+
+for i in "${dirs[@]}"; do
+    echo -e "[/] Scan directory: $i"
+    updateDir "$i"
+done
