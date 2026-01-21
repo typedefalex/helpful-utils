@@ -25,7 +25,7 @@ function getYearFromDate() {
 function getGitCreationDate() {
     local file="$1"
     
-    local result="$(git log --follow --format=%aI --all $file 2>&1)"
+    local result="$(git log --follow --format=%aI $file 2>&1)"
     if [[ "$?" != "0" ]]; then
         echo -e "File: $file\ngetGitCreationDate error, $result\n\n" 1>&2
         echo ""
@@ -53,7 +53,7 @@ function getGitCreationDate() {
 function getGitModificationDate() {
     local file="$1"
     
-    local result="$(git log --follow --format=%aI --all $file 2>&1)"
+    local result="$(git log --follow --format=%aI $file 2>&1)"
     if [[ "$?" != "0" ]]; then
         echo -e "File: $file\ngetGitModificationDate error, $result\n\n" 1>&2
         echo ""
@@ -225,14 +225,45 @@ function goFile() {
     local year_git_finish=$(getYearFromDate "$gitModificationDate")
     local year_now=$(getYearFromDate "$nowDate")
     
-    local allYears=()
+    #if year_git_finish > year_now error
+    # if existed_copyright_start > bla bla bla
+    # existed_copyright_end >...
     
-    allYears+=($existed_copyright_start)
-    allYears+=($existed_copyright_end)
-    allYears+=($year_git_start)
-    allYears+=($year_git_finish)
+    #local allYears=()
     
-    target_copyright="$(getCopyrightFromDates "${copyright_placeholder}" "${allYears[@]}")"
+    #allYears+=($existed_copyright_start)
+    #allYears+=($existed_copyright_end)
+    #allYears+=($year_git_start)
+    #allYears+=($year_git_finish)
+    
+    #target_copyright="$(getCopyrightFromDates "${copyright_placeholder}" "${allYears[@]}")"
+    
+    
+    if [[ "$founded" == "" ]]; then
+#         if [[ "$min" == "$max" ]]; then  
+#             local placeholder_date="${min}"      
+#         else
+#             local placeholder_date="${min}-${max}"
+#         fi
+
+        target_copyright=${copyright_placeholder/|date|/"$year_now"}
+    else
+        if [[ "$existed_copyright_end" == "" ]]; then
+            if (( "$existed_copyright_start" >= "$year_git_finish" )) then
+                target_copyright=${copyright_placeholder/|date|/"$existed_copyright_start"}
+            else
+                target_copyright=${copyright_placeholder/|date|/"${existed_copyright_start}-$year_now"}
+            fi
+        else
+            if (( $year_git_finish > $existed_copyright_end )); then
+                target_copyright=${copyright_placeholder/|date|/"${existed_copyright_start}-${year_now}"}
+            else
+                target_copyright=${copyright_placeholder/|date|/"${existed_copyright_start}-${existed_copyright_end}"}
+            fi
+        fi
+    fi
+    
+    
     
     if $VERBOSE; then
         echo -e "\tFounded copyright:\t$founded"
@@ -241,10 +272,21 @@ function goFile() {
     
     # check if target copyright if differ than existed or
     # if we did not find any copyright
-    if [[ "$founded" != "$target_copyright" || "$founded" == "" ]]; then
+    
+    cmp -bl  <(echo "$founded" ) <(echo "$target_copyright")
+    
+  #  echo "q${founded}q${target_copyright}q"
+    #founded=${target_copyright}
+    
+#     echo -ne "${founded}" | xxd -p -u
+#     echo -ne "${target_copyright}" | xxd -p -u
+    
+    if [[ "$founded" != "$target_copyright" ]]; then
+        echo qqq
+    
         # since we changing file, our end date must be current year
-        allYears+=($year_now)
-        target_copyright="$(getCopyrightFromDates "${copyright_placeholder}" "${allYears[@]}")"
+        #allYears+=($year_now)
+        #target_copyright="$(getCopyrightFromDates "${copyright_placeholder}" "${allYears[@]}")"
         
         if $VERBOSE; then
             echo -e "\n\t[v] $(realpath $file) will be updated"
@@ -263,7 +305,7 @@ function goFile() {
                 sed -i -r "s|$copyright_regexp|$target_copyright|" $file
             fi
         fi
-    fi
+     fi
 }
 
 function updateDir() {
@@ -361,11 +403,21 @@ if [[ "$COPYRIGHT_REGEXP" == "" ]]; then
     exit 1
 fi
 
-echo -e "\nWill look in dirs:"
+echo -e "\nWill look in files/dirs:"
 
 for i in "${dirs[@]}"; do
-    if [[ ${i:0:1} != / ]]; then
-        echo "Error: directory $i is not absolute path"
+    if [ -f "${i}" ]; then
+        if [[ ${i:0:1} != / ]]; then
+            echo "Error: file $i is not absolute path"
+            exit 1
+        fi
+    elif [ -d "${i}" ]; then
+        if [[ ${i:0:1} != / ]]; then
+            echo "Error: directory $i is not absolute path"
+            exit 1
+        fi
+    else
+        echo "Invalid input $i"
         exit 1
     fi
     
@@ -375,6 +427,13 @@ done
 echo -en "\n\n"
 
 for i in "${dirs[@]}"; do
-    echo -e "[/] Scan directory: $i"
-    updateDir "$i"
+    if [ -f "${i}" ]; then
+        echo -e "[/] Scan file $i"
+        goFile "$i" "$COPYRIGHT_PLACEHOLDER" "$COPYRIGHT_REGEXP"
+    elif [ -d "${i}" ]; then
+        echo -e "[/] Scan directory: $i"
+        updateDir "$i"
+    fi
 done
+
+exit $UPDATE_FILES_COUNT
